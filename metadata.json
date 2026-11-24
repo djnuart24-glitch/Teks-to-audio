@@ -1,0 +1,6 @@
+{
+  "name": "Sawtuna - Teks ke Audio & Audio ke JSON (Arab-Indonesia)",
+  "description": "Aplikasi konversi teks bahasa Indonesia bernuansa Arab ke audio berkualitas tinggi, serta transkripsi audio menjadi teks JSON terstruktur.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
