@@ -23,6 +23,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { StructuredTranscriptJson } from '../types';
+import { safeFetchJson } from '../utils/api';
 
 export const AudioToJsonTab: React.FC = () => {
   const [activeInputMode, setActiveInputMode] = useState<'record' | 'upload' | 'sample'>('record');
@@ -189,11 +190,14 @@ export const AudioToJsonTab: React.FC = () => {
     setIsProcessing(true);
 
     try {
-      // Generate sample audio on the fly with TTS so the user has an actual live audio file to transcribe
       const sampleText =
         "Bismillaahir-rahmaanir-rahiim. Alhamdulillahi rabbil 'alamin. Assalamu'alaikum warahmatullahi wabarakatuh sahabat sekalian. Semoga Allah Subhanahu wa Ta'ala melimpahkan berkah dan meridhai ikhtiar kita hari ini. Jazakallahu khairan atas kebersamaan kita.";
 
-      const ttsRes = await fetch('/api/tts', {
+      const ttsResult = await safeFetchJson<{
+        success: boolean;
+        audioBase64: string;
+        error?: string;
+      }>('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -203,17 +207,16 @@ export const AudioToJsonTab: React.FC = () => {
         }),
       });
 
-      const ttsData = await ttsRes.json();
-      if (!ttsRes.ok || !ttsData.audioBase64) {
-        throw new Error(ttsData.error || 'Gagal memuat sampel audio.');
+      if (!ttsResult.ok || !ttsResult.data?.audioBase64) {
+        throw new Error(ttsResult.error || 'Gagal memuat sampel audio.');
       }
 
-      setUploadedBase64(ttsData.audioBase64);
+      setUploadedBase64(ttsResult.data.audioBase64);
       setUploadedMimeType('audio/wav');
       setUploadedFile(new File([], 'sampel-tausiyah-arab-indo.wav', { type: 'audio/wav' }));
 
       // Immediately transcribe the sample
-      await processTranscription(ttsData.audioBase64, 'audio/wav', 'Sampel Audio Tausiyah Arab-Indonesia');
+      await processTranscription(ttsResult.data.audioBase64, 'audio/wav', 'Sampel Audio Tausiyah Arab-Indonesia');
     } catch (err: any) {
       console.error('Sample loading error:', err);
       setError(err?.message || 'Gagal memuat sampel audio.');
@@ -246,7 +249,11 @@ export const AudioToJsonTab: React.FC = () => {
     setError(null);
 
     try {
-      const response = await fetch('/api/transcribe-to-json', {
+      const result = await safeFetchJson<{
+        success: boolean;
+        data: StructuredTranscriptJson;
+        error?: string;
+      }>('/api/transcribe-to-json', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -256,13 +263,11 @@ export const AudioToJsonTab: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Gagal mengubah audio menjadi teks JSON.');
+      if (!result.ok || !result.data?.success || !result.data?.data) {
+        throw new Error(result.error || result.data?.error || 'Gagal mengubah audio menjadi teks JSON.');
       }
 
-      setTranscriptResult(data.data);
+      setTranscriptResult(result.data.data);
     } catch (err: any) {
       console.error('Transcription error:', err);
       setError(err?.message || 'Terjadi kesalahan saat memproses transkripsi audio.');

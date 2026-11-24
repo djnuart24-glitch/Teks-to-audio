@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Play, Pause, Volume2, VolumeX, Download, RotateCcw } from 'lucide-react';
+import { base64ToBlobUrl } from '../utils/api';
 
 interface AudioPlayerProps {
   audioBase64: string;
@@ -27,11 +28,24 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
 
-  const audioSrc = `data:${mimeType};base64,${audioBase64}`;
+  const [audioSrc, setAudioSrc] = useState<string>('');
+
+  // Convert base64 to Blob URL for clean Safari/iOS playback
+  useEffect(() => {
+    if (!audioBase64) return;
+    const url = base64ToBlobUrl(audioBase64, mimeType);
+    setAudioSrc(url);
+
+    return () => {
+      if (url.startsWith('blob:')) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [audioBase64, mimeType]);
 
   // Handle autoPlay on new audio
   useEffect(() => {
-    if (audioRef.current) {
+    if (audioRef.current && audioSrc) {
       audioRef.current.currentTime = 0;
       setCurrentTime(0);
       if (autoPlay) {
@@ -44,7 +58,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           });
       }
     }
-  }, [audioBase64, autoPlay]);
+  }, [audioSrc, autoPlay]);
 
   // Audio event listeners
   const onLoadedMetadata = () => {

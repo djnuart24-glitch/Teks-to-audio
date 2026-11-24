@@ -16,6 +16,8 @@ import {
 import { VOICES, TTS_PRESETS, QUICK_ARABIC_PHRASES } from '../data/presets';
 import { VoiceOption, GeneratedAudioHistoryItem } from '../types';
 import { AudioPlayer } from './AudioPlayer';
+import { safeFetchJson } from '../utils/api';
+import { speakWithBrowser, stopBrowserSpeech } from '../utils/browserSpeech';
 
 interface TextToSpeechTabProps {
   onOpenEnhancer: () => void;
@@ -46,10 +48,12 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
       if (onClearExternalText) onClearExternalText();
     }
   }, [externalText, onClearExternalText]);
+
   const [selectedVoice, setSelectedVoice] = useState<VoiceOption>(VOICES[0]);
   const [accentIntensity, setAccentIntensity] = useState<'light' | 'moderate' | 'strong'>('moderate');
   const [customStyle, setCustomStyle] = useState<string>('Santun, ramah, dan fasih bertajwid');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isSpeakingBrowser, setIsSpeakingBrowser] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedPreset, setCopiedPreset] = useState<string | null>(null);
 
@@ -68,7 +72,21 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
     setTimeout(() => setCopiedPreset(null), 1800);
   };
 
-  // Call the server TTS endpoint
+  // Browser speech fallback handler
+  const handlePlayBrowserSpeech = () => {
+    if (!text.trim()) return;
+    setIsSpeakingBrowser(true);
+    const success = speakWithBrowser(text, {
+      rate: 0.9,
+      onEnd: () => setIsSpeakingBrowser(false),
+      onError: () => setIsSpeakingBrowser(false),
+    });
+    if (!success) {
+      setIsSpeakingBrowser(false);
+    }
+  };
+
+  // Call the server TTS endpoint safely
   const handleGenerateAudio = async () => {
     if (!text.trim()) {
       setError('Silakan masukkan teks yang ingin diubah menjadi audio.');
@@ -79,7 +97,12 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
     setError(null);
 
     try {
-      const response = await fetch('/api/tts', {
+      const result = await safeFetchJson<{
+        success: boolean;
+        audioBase64: string;
+        mimeType?: string;
+        error?: string;
+      }>('/api/tts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -92,19 +115,21 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Gagal menghasilkan audio dari server.');
+      if (!result.ok || !result.data?.success || !result.data?.audioBase64) {
+        throw new Error(
+          result.error ||
+            result.data?.error ||
+            'Gagal menghasilkan audio dari server. Pastikan API key aktif.'
+        );
       }
 
       const newAudioItem: GeneratedAudioHistoryItem = {
         id: `audio_${Date.now()}`,
         text: text.trim(),
-        audioBase64: data.audioBase64,
+        audioBase64: result.data.audioBase64,
         voice: selectedVoice.id,
         voiceName: selectedVoice.name,
-        mimeType: data.mimeType || 'audio/wav',
+        mimeType: result.data.mimeType || 'audio/wav',
         timestamp: Date.now(),
       };
 
@@ -112,7 +137,12 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
       setGeneratedAudios((prev) => [newAudioItem, ...prev.slice(0, 9)]);
     } catch (err: any) {
       console.error('TTS error:', err);
-      setError(err?.message || 'Terjadi gangguan saat memanggil Gemini TTS.');
+      const msg = err?.message || 'Terjadi gangguan saat memproses audio.';
+      setError(
+        msg === 'The string did not match the expected pattern.'
+          ? 'Format data respons server tidak sesuai pola yang diharapkan. Silakan gunakan tombol putar browser di bawah ini atau coba beberapa saat lagi.'
+          : msg
+      );
     } finally {
       setIsLoading(false);
     }
@@ -373,8 +403,8 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
               </div>
             </div>
 
-            {/* Action Button */}
-            <div className="pt-2">
+            {/* Action Buttons */}
+            <div className="pt-2 space-y-2.5">
               <button
                 type="button"
                 onClick={handleGenerateAudio}
@@ -398,12 +428,43 @@ export const TextToSpeechTab: React.FC<TextToSpeechTabProps> = ({
                 )}
               </button>
 
+              {/* Instant Browser Speech Quick Play Option */}
+              <button
+                type="button"
+                onClick={handlePlayBrowserSpeech}
+                disabled={!text.trim()}
+                className="w-full py-2.5 px-4 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/90 text-emerald-800 text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Volume2 className="w-4 h-4 text-emerald-600" />
+                <span>
+                  {isSpeakingBrowser
+                    ? 'Sedang Membaca lewat Browser...'
+                    : 'Putar Instan via Audio Peramban (Lokal)'}
+                </span>
+              </button>
+
               {error && (
-                <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-semibold">Terjadi Kendala</p>
-                    <p className="mt-0.5">{error}</p>
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-slate-800 text-xs space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-bold text-amber-950">Catatan Koneksi Server</p>
+                      <p className="mt-0.5 text-slate-700 leading-relaxed">{error}</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-200/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-600">
+                      Anda dapat tetap mendengarkan audio langsung di perangkat ini:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handlePlayBrowserSpeech}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>{isSpeakingBrowser ? 'Sedang Membaca...' : 'Putar Audio Browser'}</span>
+                    </button>
                   </div>
                 </div>
               )}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Sparkles, Check, ArrowRight, RefreshCw } from 'lucide-react';
+import { safeFetchJson } from '../utils/api';
 
 interface EnhanceTextModalProps {
   isOpen: boolean;
@@ -34,7 +35,11 @@ export const EnhanceTextModal: React.FC<EnhanceTextModalProps> = ({
     setError(null);
 
     try {
-      const response = await fetch('/api/enhance-text', {
+      const result = await safeFetchJson<{
+        success: boolean;
+        enhancedText: string;
+        error?: string;
+      }>('/api/enhance-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -43,12 +48,11 @@ export const EnhanceTextModal: React.FC<EnhanceTextModalProps> = ({
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Gagal memperkaya teks.');
+      if (!result.ok || !result.data?.success || !result.data?.enhancedText) {
+        throw new Error(result.error || result.data?.error || 'Gagal memperkaya teks.');
       }
 
-      setEnhancedText(data.enhancedText);
+      setEnhancedText(result.data.enhancedText);
     } catch (err: any) {
       console.error('Enhance error:', err);
       setError(err?.message || 'Terjadi kesalahan pada asisten AI.');
